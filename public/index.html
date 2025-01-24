@@ -9,7 +9,7 @@
     <script type="module">
         // Firebase 초기화
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, orderBy, query, serverTimestamp, limit, where, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, orderBy, query, serverTimestamp, where, deleteDoc, doc, getDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
 
         const firebaseConfig = {
@@ -106,7 +106,8 @@
         // 메모 삭제 함수
         window.deleteNote = async function(noteId) {
             try {
-                await deleteDoc(doc(db, "notes", noteId)); // 메모 삭제
+                const noteRef = doc(db, "notes", noteId); // 메모 문서 참조
+                await deleteDoc(noteRef); // 메모 영구 삭제
                 loadNotes(); // 메모 목록 새로 고침
             } catch (error) {
                 console.error("Error deleting note: ", error);
@@ -133,7 +134,8 @@
                             <p>${noteData.text}</p>
                             <small>${new Date(noteData.timestamp?.toDate()).toLocaleString()}</small> <!-- 저장된 시간 표시 -->
                             <button onclick="deleteNote('${doc.id}')">삭제</button>
-                        `; // 메모 내용과 시간, 삭제 버튼 추가
+                            <button onclick="restoreNote('${doc.id}')">복원</button> <!-- 복원 버튼 추가 -->
+                        `; // 메모 내용과 시간, 삭제 및 복원 버튼 추가
                         notesContainer.appendChild(noteElement); // 메모 목록에 추가
                     });
 
@@ -145,6 +147,20 @@
                 }
             } else {
                 alert("로그인 후 메모를 불러올 수 있습니다.");
+            }
+        };
+
+        // 메모 복원 함수
+        window.restoreNote = async function(noteId) {
+            try {
+                const noteRef = doc(db, "notes", noteId); // 메모 문서 참조
+                const noteSnapshot = await getDoc(noteRef); // 메모 데이터 가져오기
+                const noteData = noteSnapshot.data();
+
+                // Quill 에디터에 메모 내용 복원
+                quill.root.innerHTML = noteData.text; // Quill 에디터에 내용 복원
+            } catch (error) {
+                console.error("Error restoring note: ", error);
             }
         };
 
