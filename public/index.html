@@ -4,118 +4,166 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>메모장 웹 앱</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Quill CSS -->
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
-    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
     <script type="module">
         // Firebase 초기화
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, orderBy, query, serverTimestamp, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, orderBy, query, serverTimestamp, limit, where, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
 
         const firebaseConfig = {
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_PROJECT_ID.appspot.com",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID"
+            apiKey: "AIzaSyBcP3PAdw-9LShYt81q1X2DVsqRfjXqCS8",
+            authDomain: "memo-7dfc0.firebaseapp.com",
+            projectId: "memo-7dfc0",
+            storageBucket: "memo-7dfc0",
+            messagingSenderId: "847704081376",
+            appId: "1:847704081376:web:04d135befd84a778a22185"
         };
 
+        // Firebase 앱 초기화
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const auth = getAuth(app);
 
         // Quill 에디터 초기화
         const quill = new Quill('#editor', {
             theme: 'snow',
             modules: {
                 toolbar: [
-                    [{ 'header': [1, 2, false] }],
-                    ['bold', 'italic', 'underline'],
-                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-                    ['link', 'image'],
-                    ['clean'] // 서식 제거 버튼
+                    ['bold', 'italic', 'underline'],        // toggled buttons
+                    ['link', 'image'],                       // link and image
+                    [{ list: 'ordered' }, { list: 'bullet' }] // lists
                 ]
             }
         });
 
+        // 사용자 등록 함수
+        window.registerUser = async function() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                alert("회원가입 성공!");
+            } catch (error) {
+                console.error("Error registering user: ", error);
+                alert(error.message);
+            }
+        };
+
+        // 사용자 로그인 함수
+        window.loginUser = async function() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                alert("로그인 성공!");
+                loadNotes(); // 로그인 후 메모 불러오기
+            } catch (error) {
+                console.error("Error logging in: ", error);
+                alert(error.message);
+            }
+        };
+
+        // 사용자 로그아웃 함수
+        window.logoutUser = async function() {
+            try {
+                await signOut(auth);
+                alert("로그아웃 성공!");
+                document.getElementById('notesContainer').innerHTML = ''; // 로그아웃 시 메모 지우기
+                quill.setText(''); // Quill 에디터 비우기
+                document.getElementById('userEmail').textContent = ''; // 사용자 이메일 지우기
+            } catch (error) {
+                console.error("Error logging out: ", error);
+            }
+        };
+
         // 메모 저장 함수
         window.saveNote = async function() {
-            const noteText = quill.root.innerHTML; // Quill 에디터의 내용을 가져옴
+            const noteText = quill.root.innerHTML; // Quill 에디터의 HTML 내용 가져오기
 
-            if (noteText) {
+            const user = auth.currentUser; // 현재 로그인한 사용자
+
+            if (noteText && user) {
                 try {
-                    const timestamp = new Date().toISOString(); // 현재 시간 기록
-
                     await addDoc(collection(db, "notes"), {
                         text: noteText,
-                        timestamp: timestamp // 시간 기록
+                        timestamp: serverTimestamp(),
+                        userId: user.uid // 메모에 사용자 ID 추가
                     });
-                    loadNotes();
-                    displayLastSavedTime(); // 저장 시간 표시 업데이트
+                    quill.setText(''); // Quill 에디터 비우기
+                    loadNotes(); // 메모 불러오기
                 } catch (error) {
                     console.error("Error adding note: ", error);
                 }
+            } else {
+                alert("로그인 후 메모를 저장할 수 있습니다.");
+            }
+        };
+
+        // 메모 삭제 함수
+        window.deleteNote = async function(noteId) {
+            try {
+                await deleteDoc(doc(db, "notes", noteId)); // 메모 삭제
+                loadNotes(); // 메모 목록 새로 고침
+            } catch (error) {
+                console.error("Error deleting note: ", error);
             }
         };
 
         // 메모 불러오기 함수
         window.loadNotes = async function() {
             const notesContainer = document.getElementById('notesContainer');
-            notesContainer.innerHTML = '';
+            notesContainer.innerHTML = ''; // 기존 메모 지우기
 
-            const q = query(collection(db, "notes"), orderBy("timestamp", "desc"));
-            const querySnapshot = await getDocs(q);
-            let lastNoteText = ''; // 마지막 메모 텍스트를 저장할 변수
-            let lastTimestamp = ''; // 마지막 메모 시간 저장할 변수
+            const user = auth.currentUser; // 현재 로그인한 사용자
+            if (user) {
+                const q = query(collection(db, "notes"), where("userId", "==", user.uid), orderBy("timestamp", "desc")); // 사용자의 메모 가져오기
+                const querySnapshot = await getDocs(q);
 
-            // 가장 최근 메모를 찾기 위해 첫 번째 문서만 가져오기
-            if (!querySnapshot.empty) {
-                const lastDoc = querySnapshot.docs[0]; // 가장 최근 문서
-                lastNoteText = lastDoc.data().text; // 마지막 메모 텍스트 저장
-                lastTimestamp = `저장 시간: ${new Date(lastDoc.data().timestamp).toLocaleString()}`; // 시간 포맷팅
+                // 메모가 있을 경우 입력 필드에 복원 및 메모 목록 표시
+                if (!querySnapshot.empty) {
+                    querySnapshot.forEach((doc) => {
+                        const noteData = doc.data();
+                        const noteElement = document.createElement('div');
+                        noteElement.className = 'note-item'; // CSS 클래스 추가
+                        noteElement.innerHTML = `
+                            <p>${noteData.text}</p>
+                            <small>${new Date(noteData.timestamp?.toDate()).toLocaleString()}</small> <!-- 저장된 시간 표시 -->
+                            <button onclick="deleteNote('${doc.id}')">삭제</button>
+                        `; // 메모 내용과 시간, 삭제 버튼 추가
+                        notesContainer.appendChild(noteElement); // 메모 목록에 추가
+                    });
+
+                    // 마지막 메모 복원
+                    const lastDoc = querySnapshot.docs[0];
+                    quill.root.innerHTML = lastDoc.data().text; // Quill 에디터에 마지막 메모 복원
+                } else {
+                    console.log("저장된 메모가 없습니다."); // 메모가 없을 경우 로그 출력
+                }
+            } else {
+                alert("로그인 후 메모를 불러올 수 있습니다.");
             }
-
-            querySnapshot.forEach((doc) => {
-                const noteDiv = document.createElement('div');
-                noteDiv.innerHTML = doc.data().text; // innerHTML로 서식 포함된 텍스트 설정
-
-                // 메모의 저장 시간 표시
-                const timestampDiv = document.createElement('div');
-                timestampDiv.textContent = `저장 시간: ${new Date(doc.data().timestamp).toLocaleString()}`; // 시간 포맷팅
-                timestampDiv.style.fontSize = '0.8em'; // 작은 글씨로 표시
-                timestampDiv.style.color = '#666'; // 색상 변경
-
-                noteDiv.appendChild(timestampDiv); // 시간 정보를 메모 div에 추가
-                notesContainer.appendChild(noteDiv);
-            });
-
-            // 마지막 메모 텍스트를 입력 필드에 설정
-            quill.root.innerHTML = lastNoteText; // 마지막 메모 내용 복원
-            const lastSavedTimeDiv = document.getElementById('lastSavedTime');
-            lastSavedTimeDiv.textContent = lastTimestamp;
-
         };
 
-        // 마지막 저장 시간 표시 함수
-        function displayLastSavedTime() {
-            const lastSavedTimeDiv = document.getElementById('lastSavedTime');
-            const currentTime = new Date().toLocaleString();
-            lastSavedTimeDiv.textContent = `마지막 저장 시간: ${currentTime}`; // 시간 포맷팅
-        }
-
-        // 메모 복원 함수
-        function restoreNote() {
-            const history = doc.data().history;
-            if (history && history.length > 0) {
-                const lastVersion = history[history.length - 1];
-                quill.root.innerHTML = lastVersion; // 마지막 버전으로 복원
-                displayLastSavedTime(); // 복원 시 저장 시간 업데이트
-            }
-        }
-
         // 페이지 로드 시 메모 불러오기
-        window.onload = loadNotes;
+        window.onload = function() {
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    document.getElementById('userEmail').textContent = `로그인한 사용자: ${user.email}`; // 사용자 이메일 표시
+                    loadNotes(); // 로그인한 경우 메모 불러오기
+                } else {
+                    document.getElementById('notesContainer').innerHTML = ''; // 로그아웃 시 메모 지우기
+                    quill.setText(''); // Quill 에디터 비우기
+                    document.getElementById('userEmail').textContent = ''; // 사용자 이메일 지우기
+                }
+            });
+        };
     </script>
+    <!-- Quill JS -->
+    <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -126,18 +174,9 @@
         h1 {
             color: #333;
         }
-        .editor-container {
-            display: flex;
-            flex-direction: column; /* 수직으로 배치 */
-        }
         #editor {
             height: 200px;
-            border: 1px solid #ccc;
-            background-color: #fff;
-            color: #333; /* 텍스트 색상 */
-            font-family: monospace; /* 코드 스타일 폰트 */
-            overflow-y: auto; /* 스크롤 가능 */
-            outline: none; /* 포커스 시 테두리 제거 */
+            margin-bottom: 10px;
         }
         button {
             padding: 10px 15px;
@@ -154,17 +193,48 @@
         .notes {
             margin-top: 20px;
         }
+        .auth-container {
+            margin-bottom: 20px;
+        }
+        input {
+            margin-right: 5px; /* 입력 필드 간격 추가 */
+            padding: 10px;
+            width: 200px; /* 입력 필드 너비 설정 */
+        }
+        .user-info {
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .note-item {
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .note-item p {
+            margin: 0;
+        }
+        .note-item small {
+            display: block;
+            color: #888;
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 <body>
     <h1>메모장</h1>
-    <div id="lastSavedTime" style="font-size: 1em; color: #333; margin-bottom: 10px;">마지막 저장 시간: 없음</div>
-    <div class="editor-container">
-        <div id="editor" placeholder="메모를 입력하세요..."></div>
+    <div class="user-info" id="userEmail"></div> <!-- 로그인한 사용자 이메일 표시 -->
+    <div class="auth-container">
+        <input type="email" id="email" placeholder="이메일" required>
+        <input type="password" id="password" placeholder="비밀번호" required>
+        <button onclick="registerUser()">회원가입</button>
+        <button onclick="loginUser()">로그인</button>
+        <button onclick="logoutUser()">로그아웃</button>
     </div>
-    <div>
-        <button onclick="saveNote()">저장</button>
-    </div>
-    <div class="notes" id="notesContainer"></div>
+    <div id="editor"></div> <!-- Quill 에디터 -->
+    <button onclick="saveNote()">저장</button>
+
+    <div class="notes" id="notesContainer"></div> <!-- 저장된 메모 목록 표시 -->
 </body>
 </html>
